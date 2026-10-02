@@ -1,0 +1,10 @@
+[plugin]
+summary = 'MCP Hub'
+version = '1.0.0'
+description = '固定爬虫服务目录、工具授权申请与独立范围 API Key'
+author = 'David'
+tags = ['mcp', 'auth']
+database = ['mysql']
+
+[app]
+router = ['router']

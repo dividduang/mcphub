@@ -1,0 +1,4 @@
+fastmcp==4.0.10
+mcp==2.2.0
+mcp-types==2.2.0
+requests==2.34.2

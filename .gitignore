@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.env
+.env.*
+.venv/
+*.pem
+*.key
+*.sql.gz
+*backup*.json
+.pytest_cache/
