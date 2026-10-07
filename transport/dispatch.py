@@ -1,6 +1,7 @@
 import anyio
 import ipaddress
 
+from fastmcp.server.http import HostOriginGuardMiddleware
 from starlette.responses import JSONResponse, PlainTextResponse
 
 from backend.plugin.mcphub.transport.server import plugin_enabled
@@ -16,11 +17,18 @@ class McpDispatcher:
     def __init__(self, app, hub):
         self.app, self.hub = app, hub
         self.inflight = 0
+        self.guarded_mcp = HostOriginGuardMiddleware(
+            self.admit_mcp, allowed_hosts=hub.config.allowed_hosts,
+            allowed_origins=hub.config.allowed_origins, mode='strict',
+        )
 
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'http' or not (scope['path'] == '/mcp' or scope['path'].startswith('/mcp/')):
             await self.app(scope, receive, send)
             return
+        await self.guarded_mcp(scope, receive, send)
+
+    async def admit_mcp(self, scope, receive, send):
         # Event-loop-owned counter: no task queue before DB/body processing.
         if self.inflight >= self.hub.config.global_limit + 32:
             await PlainTextResponse('MCP request capacity exhausted', status_code=429,

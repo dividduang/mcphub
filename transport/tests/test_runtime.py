@@ -3,6 +3,7 @@ import threading
 import unittest
 
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from pydantic import ValidationError
@@ -12,6 +13,7 @@ from backend.plugin.mcphub.crawlers.network import Fetcher, PinnedHTTPSAdapter, 
 from backend.plugin.mcphub.service.auth_service import McpAuthorizationError
 from backend.plugin.mcphub.transport.config import RuntimeConfig
 from backend.plugin.mcphub.transport.executor import BoundedExecutor, CapacityExceeded
+from backend.plugin.mcphub.transport.dispatch import McpDispatcher
 from backend.plugin.mcphub.transport.tests.upstream import ControlledUpstream
 
 
@@ -102,6 +104,40 @@ class RuntimeBehaviorTests(unittest.IsolatedAsyncioTestCase):
                     RuntimeConfig.from_env()
             with self.assertRaises(UpstreamError):
                 PinnedHTTPSAdapter('pypi.org', address)
+
+
+class IngressSecurityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_origin_rejection_precedes_unavailability_query_and_capacity(self):
+        async def host_app(scope, receive, send):
+            await send({'type': 'http.response.start', 'status': 204, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+
+        hub = SimpleNamespace(config=RuntimeConfig(), apps={'/mcp/pypi': host_app}, ready=False)
+        app = McpDispatcher(host_app, hub)
+
+        async def status(path, origin=None, query=b''):
+            messages = []
+
+            async def receive():
+                self.fail('Rejected request must not consume the body')
+
+            async def send(message):
+                messages.append(message)
+
+            headers = [(b'host', b'127.0.0.1')]
+            if origin is not None:
+                headers.append((b'origin', origin))
+            await app({'type': 'http', 'path': path, 'method': 'POST',
+                       'scheme': 'http', 'query_string': query, 'headers': headers}, receive, send)
+            return messages[0]['status']
+
+        self.assertEqual(await status('/mcp/pypi'), 503)
+        self.assertEqual(await status('/mcp/pypi', b'https://evil.invalid'), 403)
+        self.assertEqual(await status('/mcp/pypi', b'https://evil.invalid', b'access_token=invalid'), 403)
+        app.inflight = hub.config.global_limit + 32
+        self.assertEqual(await status('/mcp/pypi', b'https://evil.invalid'), 403)
+        self.assertEqual(await status('/mcp/pypi'), 429)
+        self.assertEqual(await status('/api/v1', b'https://evil.invalid'), 204)
 
 
 if __name__ == '__main__':
