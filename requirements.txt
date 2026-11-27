@@ -1,4 +1,4 @@
-fastmcp==4.0.10
-mcp==2.2.0
-mcp-types==2.2.0
-requests==2.34.2
+# MCP Hub 运行依赖。
+# fastmcp 只用到 transport/dispatch.py 里的 HostOriginGuardMiddleware
+# （MCP 入口的 Host/Origin 白名单）；对外请求走 httpx 直连，不经 FastMCP 客户端。
+fastmcp>=3.3.1,<4

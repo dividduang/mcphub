@@ -7,20 +7,28 @@ from backend.plugin.mcphub.model.entities import McpGrant, McpKeyBinding, McpSer
 
 
 async def lock_user(db: AsyncSession, user_id: int, *, require_active: bool = True) -> User:
+    # FBA 的 sys_user 保留逻辑删除列：已软删的账号不得再被锁定/授权。
     user = await db.scalar(select(User).where(User.id == user_id, User.deleted == 0).with_for_update())
     if user is None or (require_active and not user.status):
-        raise errors.NotFoundError(msg='User not found or inactive')
+        raise errors.NotFoundError(msg="User not found or inactive")
     return user
 
 
 async def available_tools(db: AsyncSession, tool_ids: list[str]) -> list[McpTool]:
-    tools = list((await db.scalars(
-        select(McpTool).join(McpServer, McpTool.server_id == McpServer.id).where(
-            McpTool.id.in_(tool_ids), McpTool.enabled.is_(True), McpServer.enabled.is_(True)
-        )
-    )).all())
+    # 空范围合法（外部服务不校验工具范围）：不查库，也不要用 in_([]) 这种恒假表达式。
+    if not tool_ids:
+        return []
+    tools = list(
+        (
+            await db.scalars(
+                select(McpTool)
+                .join(McpServer, McpTool.server_id == McpServer.id)
+                .where(McpTool.id.in_(tool_ids), McpTool.enabled.is_(True), McpServer.enabled.is_(True))
+            )
+        ).all()
+    )
     if len(tools) != len(set(tool_ids)):
-        raise errors.RequestError(msg='Unknown or disabled tool')
+        raise errors.RequestError(msg="Unknown or disabled tool")
     return tools
 
 
@@ -29,14 +37,19 @@ async def effective_tools(db: AsyncSession, key_id: str, user_id: int, server_id
         select(McpTool)
         .join(McpServer, McpTool.server_id == McpServer.id)
         .join(McpKeyBinding, McpKeyBinding.tool_id == McpTool.id)
-        .join(McpGrant, and_(
-            McpGrant.tool_id == McpTool.id,
-            McpGrant.user_id == user_id,
-            McpGrant.generation == McpKeyBinding.generation,
-        ))
+        .join(
+            McpGrant,
+            and_(
+                McpGrant.tool_id == McpTool.id,
+                McpGrant.user_id == user_id,
+                McpGrant.generation == McpKeyBinding.generation,
+            ),
+        )
         .where(
-            McpKeyBinding.key_id == key_id, McpGrant.active.is_(True),
-            McpTool.enabled.is_(True), McpServer.enabled.is_(True),
+            McpKeyBinding.key_id == key_id,
+            McpGrant.active.is_(True),
+            McpTool.enabled.is_(True),
+            McpServer.enabled.is_(True),
         )
     )
     if server_id is not None:

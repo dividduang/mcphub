@@ -1,10 +1,36 @@
 [plugin]
 summary = 'MCP Hub'
-version = '1.0.0'
-description = '固定爬虫服务目录、工具授权申请与独立范围 API Key'
+version = '3.0.0'
+description = '手动登记的 MCP 服务器目录、透明代理与独立范围 API Key（用户自助 + 管理后台分离）'
 author = 'David'
 tags = ['mcp', 'auth']
-database = ['mysql']
+database = ['postgresql']
+# 用户授权页的 AD 建档走 ldap_auth 的 DAO（hub_service.resolve_user 函数内
+# 延迟导入）。声明依赖让框架在启动期校验，ldap_auth 缺失时立刻报错，
+# 而不是等管理员调用解析端点才以 ImportError→500 的形态爆出来。
+depends_on = ['ldap_auth']
 
 [app]
 router = ['router']
+
+[settings]
+# 部署必须显式设置公开绝对 origin。留空表示回落 request.base_url（浏览器实际访问的
+# 主机，域名部署下即为正确公网 origin）；填了固定值则所有用户看到该值。
+MCPHUB_PUBLIC_BASE_URL = ""
+# MCP 入口 Host 白名单，禁止通配符
+MCPHUB_ALLOWED_HOSTS = "127.0.0.1,localhost"
+# 浏览器跨域调用所需的可信 Origin，空列表表示不接受浏览器直接调用
+MCPHUB_ALLOWED_ORIGINS = ""
+# 在途请求总上限（单执行实例）
+MCPHUB_GLOBAL_LIMIT = 32
+# 单上游站点速率上限（令牌桶，不等待，超了直接 429）
+MCPHUB_SITE_RPS = 4
+# 代理转发的流式读超时（秒）：MCP tools/call 可能是长任务，两次 chunk 间隔几分钟
+# 很正常；响应头已发出后超时只能断连，所以这个值就是长任务上限。探测端仍用短超时。
+MCPHUB_STREAM_READ_TIMEOUT = 300
+# LDAP 自动建档的落点（用户授权页按 AD 账号建档时用）：部门 ID 与角色 ID 列表。
+# 换库 / 换环境必须改——部门不存在会让建档用户「所属部门不存在」，角色停用会全角色锁定。
+MCPHUB_PROVISION_DEPT_ID = 1
+MCPHUB_PROVISION_ROLE_IDS = "1"
+# 同机所有进程共用的执行器锁路径
+MCPHUB_LOCK_PATH = "/tmp/fba-mcphub-executor.lock"
